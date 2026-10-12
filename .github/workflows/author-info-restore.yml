@@ -1,0 +1,79 @@
+name: Author metadata restoration comparison
+
+on:
+  push:
+    branches: [validation/dataset-info-lazy-label-oct12]
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: ${{ matrix.config.name }} / ${{ matrix.source }}
+    runs-on: ${{ matrix.config.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [base, head]
+        config:
+          - name: Linux legacy protobuf
+            os: ubuntu-22.04
+            python: '3.10'
+            tf: '2.15.1'
+            protobuf: '3.20.3'
+            metadata: '1.15.0'
+          - name: Linux deprecated label
+            os: ubuntu-22.04
+            python: '3.11'
+            tf: '2.21.0'
+            protobuf: '6.33.6'
+            metadata: '1.21.0'
+          - name: Linux removed label
+            os: ubuntu-22.04
+            python: '3.12'
+            tf: '2.21.0'
+            protobuf: '7.36.1'
+            metadata: '1.21.0'
+          - name: Windows deprecated label
+            os: windows-latest
+            python: '3.12'
+            tf: '2.21.0'
+            protobuf: '6.33.6'
+            metadata: '1.21.0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.config.python }}
+      - name: Select exact production source
+        shell: bash
+        env:
+          SOURCE: ${{ matrix.source }}
+        run: |
+          if [ "$SOURCE" = base ]; then
+            git show 551ab5bbd401b3a6b83611dedb83b04f07400057:tensorflow_datasets/core/dataset_info.py > tensorflow_datasets/core/dataset_info.py
+          fi
+          git diff --stat c2476a0d02c18894f6dbd4f39f878260287a1735 -- tensorflow_datasets
+      - name: Install actual runtime
+        run: >-
+          python -m pip install -e . pytest pillow dill importlib-resources
+          tensorflow-cpu==${{ matrix.config.tf }}
+          protobuf==${{ matrix.config.protobuf }}
+          tensorflow-metadata==${{ matrix.config.metadata }}
+      - name: Compare complete metadata and related modules
+        env:
+          SOURCE: ${{ matrix.source }}
+          EXPECT_PROTOBUF: ${{ matrix.config.protobuf }}
+          EXPECT_TF: ${{ matrix.config.tf }}
+        run: python author_info_restore.py
+      - name: Save evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: info-${{ matrix.config.os }}-${{ matrix.config.python }}-${{ matrix.source }}
+          path: |
+            info-results.xml
+            info-report.json
